@@ -1,0 +1,83 @@
+name: Monitor M3U8 Anti-Freeze (Links Privados)
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel_names:
+        description: 'Nombres separados por | (enviados desde el panel)'
+        required: false
+        default: ''
+      freeze_seconds:
+        description: 'Segundos congelados para alertar'
+        required: false
+        default: '26'
+      cooldown_seconds:
+        description: 'Espera entre alertas repetidas (seg)'
+        required: false
+        default: '15'
+
+jobs:
+  vigilar_streams:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Instalar FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg curl
+
+      - name: Vigilar enlaces privados (Congelamiento y Recuperación)
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          STREAMS_URLS: ${{ secrets.STREAMS_URLS }}
+          CHANNEL_NAMES: ${{ inputs.channel_names }}
+          FREEZE_SEC: ${{ inputs.freeze_seconds }}
+          COOLDOWN_SEC: ${{ inputs.cooldown_seconds }}
+        run: |
+          FREEZE_SEC="${FREEZE_SEC:-10}"
+          COOLDOWN_SEC="${COOLDOWN_SEC:-120}"
+          SAMPLE_DUR=$((FREEZE_SEC + 4))
+
+          IFS='|' read -ra NAMES <<< "$CHANNEL_NAMES"
+          mapfile -t URLS <<< "$STREAMS_URLS"
+
+          END_TIME=$((SECONDS + 21400))
+          while [ $SECONDS -lt $END_TIME ]; do
+            for i in "${!URLS[@]}"; do
+              URL="${URLS[$i]//$'\r'/}"
+              URL="${URL#"${URL%%[![:space:]]*}"}"
+              URL="${URL%"${URL##*[![:space:]]}"}"
+              [ -z "$URL" ] && continue
+              NAME="${NAMES[$i]:-Canal $((i + 1))}"
+              (
+                FROZEN_FLAG="/tmp/tg_frozen_${i}"
+                CD_FILE="/tmp/tg_cd_${i}"
+                OUT=$(ffmpeg -hide_banner -loglevel info -rw_timeout 10000000 -i "$URL" -t "$SAMPLE_DUR" -vf "freezedetect=n=-55dB:d=${FREEZE_SEC}" -an -f null - 2>&1 || true)
+
+                if echo "$OUT" | grep -q "lavfi.freezedetect.freeze_start"; then
+                  touch "$FROZEN_FLAG"
+                  NOW=$(date +%s)
+                  LAST=0
+                  [ -f "$CD_FILE" ] && LAST=$(cat "$CD_FILE" 2>/dev/null || echo 0)
+                  if [ $((NOW - LAST)) -ge "$COOLDOWN_SEC" ]; then
+                    echo "$NOW" > "$CD_FILE"
+                    MSG="🚨 IMAGEN PARALIZADA: ${NAME} lleva al menos ${FREEZE_SEC}s sin movimiento."
+                    if [ -n "$TG_BOT_TOKEN" ] && [ -n "$TG_CHAT_ID" ]; then
+                      curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+                        --data-urlencode "chat_id=${TG_CHAT_ID}" \
+                        --data-urlencode "text=${MSG}" > /dev/null
+                    fi
+                  fi
+                elif [ -f "$FROZEN_FLAG" ] && echo "$OUT" | grep -qE "frame=[[:space:]]*[1-9]"; then
+                  rm -f "$FROZEN_FLAG" "$CD_FILE"
+                  MSG="✅ MOVIMIENTO RESTABLECIDO: ${NAME} volvió a transmitir con normalidad."
+                  if [ -n "$TG_BOT_TOKEN" ] && [ -n "$TG_CHAT_ID" ]; then
+                    curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+                      --data-urlencode "chat_id=${TG_CHAT_ID}" \
+                      --data-urlencode "text=${MSG}" > /dev/null
+                  fi
+                fi
+              ) &
+            done
+            wait
+            sleep 5
+          done
