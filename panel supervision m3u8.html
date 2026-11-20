@@ -1,0 +1,1211 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Monitor M3U8 Anti-Freeze — Telegram + Control GitHub</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace']
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #0b0f19;
+      color: #e2e8f0;
+    }
+    @keyframes pulse-red {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+      50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+    }
+    .freeze-alert-card {
+      animation: pulse-red 1.6s infinite;
+    }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col bg-slate-950 text-slate-100 selection:bg-indigo-500 selection:text-white">
+
+  <!-- Header -->
+  <header class="sticky top-0 z-30 border-b border-slate-800/80 bg-slate-900/90 backdrop-blur-md">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-sky-600/20 border border-sky-500/40 flex items-center justify-center text-sky-400">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+          </svg>
+        </div>
+        <div>
+          <div class="flex flex-wrap items-center gap-2">
+            <h1 class="text-base sm:text-lg font-bold tracking-tight text-white">M3U8 FreezeGuard</h1>
+            <span id="wakeLockBadge" class="text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
+              Pantalla: Normal
+            </span>
+            <span id="ghStatusBadge" class="text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
+              Nube: Sin configurar
+            </span>
+          </div>
+          <p class="text-xs text-slate-400">Detector de imagen paralizada y recuperación · Solo Telegram</p>
+        </div>
+      </div>
+
+      <!-- Counters & Global Actions -->
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="flex items-center gap-2.5 bg-slate-950/90 border border-slate-800 px-3 py-1.5 rounded-lg text-xs">
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+            <span class="text-slate-400">Local:</span>
+            <strong id="countOk" class="font-mono text-emerald-400">0</strong>
+          </div>
+          <span class="text-slate-700">|</span>
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-rose-500"></span>
+            <strong id="countFrozen" class="font-mono text-rose-400">0</strong>
+          </div>
+          <span class="text-slate-700">|</span>
+          <strong id="sessionUptime" class="font-mono text-indigo-300">00:00:00</strong>
+        </div>
+
+        <button id="btnStartAll" type="button" class="px-3 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition flex items-center gap-1.5">
+          <span>Iniciar Local</span>
+        </button>
+
+        <button id="btnStopAll" type="button" class="px-3 py-2 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition">
+          Detener
+        </button>
+
+        <span class="hidden sm:inline-block h-5 w-px bg-slate-800 mx-0.5"></span>
+
+        <button id="btnTriggerGithub" type="button" class="px-3.5 py-2 rounded-lg text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white transition flex items-center gap-1.5 shadow-sm">
+          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.28-.01-1.02-.02-2-3.2.7-3.88-1.54-3.88-1.54-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.09-.12-.29-.52-1.47.11-3.06 0 0 .97-.31 3.18 1.18a11.05 11.05 0 015.79 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.77.11 3.06.74.8 1.19 1.83 1.19 3.09 0 4.42-2.69 5.39-5.26 5.68.41.36.78 1.07.78 2.15 0 1.55-.01 2.8-.01 3.18 0 .31.21.68.8.56A11.51 11.51 0 0023.5 12C23.5 5.65 18.35.5 12 .5z"/></svg>
+          <span>Iniciar en GitHub</span>
+        </button>
+
+        <button id="btnCancelGithub" type="button" class="px-3 py-2 rounded-lg text-xs font-semibold bg-rose-950/70 hover:bg-rose-900/80 text-rose-300 border border-rose-700/60 transition">
+          Detener Nube
+        </button>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div class="max-w-7xl mx-auto px-4 flex items-center gap-1 overflow-x-auto border-t border-slate-800/60 bg-slate-900/50">
+      <button type="button" data-tab="tab-monitor" class="nav-tab-btn px-4 py-2.5 text-xs sm:text-sm font-medium border-b-2 border-indigo-500 text-indigo-400 whitespace-nowrap transition">
+        1. Panel de Canales
+      </button>
+      <button type="button" data-tab="tab-alerts" class="nav-tab-btn px-4 py-2.5 text-xs sm:text-sm font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200 whitespace-nowrap transition">
+        2. Alertas Telegram
+      </button>
+      <button type="button" data-tab="tab-cloud" class="nav-tab-btn px-4 py-2.5 text-xs sm:text-sm font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200 whitespace-nowrap transition">
+        3. Modo Nube (GitHub Actions)
+      </button>
+      <button type="button" data-tab="tab-logs" class="nav-tab-btn px-4 py-2.5 text-xs sm:text-sm font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200 whitespace-nowrap transition flex items-center gap-1.5">
+        <span>4. Historial</span>
+        <span id="logCounterBadge" class="px-1.5 py-0.5 text-[10px] rounded-full bg-slate-800 text-slate-300 font-mono">0</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Toast Container -->
+  <div id="toastContainer" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none px-4 sm:px-0"></div>
+
+  <!-- Main Content -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 py-5 space-y-6">
+
+    <!-- TAB 1: LIVE MONITOR -->
+    <section id="tab-monitor" class="space-y-5">
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex flex-wrap items-center justify-between gap-4">
+        <div class="flex flex-wrap items-center gap-4 sm:gap-6">
+          <div>
+            <label for="freezeSecondsInput" class="block text-[11px] font-medium text-slate-400 uppercase tracking-wider">
+              Umbral sin movimiento
+            </label>
+            <div class="flex items-center gap-2 mt-1">
+              <input id="freezeSecondsInput" type="number" min="3" max="120" value="10" class="w-20 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-sm font-mono text-white focus:outline-none focus:border-indigo-500" />
+              <span class="text-xs text-slate-400">segundos</span>
+            </div>
+          </div>
+
+          <div>
+            <label for="sensitivityInput" class="block text-[11px] font-medium text-slate-400 uppercase tracking-wider">
+              Sensibilidad (Local)
+            </label>
+            <div class="flex items-center gap-2 mt-1">
+              <input id="sensitivityInput" type="number" min="0.1" max="10" step="0.1" value="0.8" class="w-20 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-sm font-mono text-white focus:outline-none focus:border-indigo-500" />
+              <span class="text-xs text-slate-400">% mínimo</span>
+            </div>
+          </div>
+
+          <div>
+            <label for="autoStopHoursInput" class="block text-[11px] font-medium text-slate-400 uppercase tracking-wider">
+              Auto-parada (Local)
+            </label>
+            <div class="flex items-center gap-2 mt-1">
+              <input id="autoStopHoursInput" type="number" min="1" max="24" value="13" class="w-20 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-sm font-mono text-white focus:outline-none focus:border-indigo-500" />
+              <span class="text-xs text-slate-400">horas</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <button id="btnLoadDemoStreams" type="button" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
+            Cargar Streams Demo
+          </button>
+          <button id="btnAddChannel" type="button" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 transition">
+            + Añadir Canal
+          </button>
+        </div>
+      </div>
+
+      <div id="channelsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"></div>
+    </section>
+
+    <!-- TAB 2: TELEGRAM ALERTS ONLY -->
+    <section id="tab-alerts" class="hidden">
+      <div class="max-w-2xl mx-auto bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-5">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <span class="w-9 h-9 rounded-lg bg-sky-500/20 border border-sky-500/40 flex items-center justify-center text-sky-400 font-bold text-sm">TG</span>
+            <div>
+              <h2 class="text-sm font-bold text-white">Alertas por Telegram</h2>
+              <p class="text-xs text-slate-400">Notifica al detectar imagen paralizada y también cuando se restablece el movimiento.</p>
+            </div>
+          </div>
+          <label class="inline-flex items-center cursor-pointer">
+            <input id="tgEnabled" type="checkbox" class="sr-only peer" />
+            <div class="w-10 h-5 bg-slate-700 rounded-full peer peer-checked:bg-sky-500 relative after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5"></div>
+          </label>
+        </div>
+
+        <div class="space-y-4 pt-1">
+          <div>
+            <label for="tgBotToken" class="block text-xs font-medium text-slate-300 mb-1">Bot Token (de @BotFather)</label>
+            <input id="tgBotToken" type="password" placeholder="123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-sky-500" />
+          </div>
+          <div>
+            <label for="tgChatId" class="block text-xs font-medium text-slate-300 mb-1">Chat ID (usuario o grupo)</label>
+            <input id="tgChatId" type="text" placeholder="987654321 o -100123456789" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-sky-500" />
+          </div>
+          <div class="flex items-center justify-between pt-1">
+            <span class="text-xs text-slate-400">Espera antes de repetir alerta del mismo canal:</span>
+            <div class="flex items-center gap-1.5">
+              <input id="alertCooldownSec" type="number" min="15" max="3600" value="120" class="w-20 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-xs font-mono text-white" />
+              <span class="text-xs text-slate-400">seg</span>
+            </div>
+          </div>
+          <div class="flex flex-wrap items-center gap-2 pt-2">
+            <button id="btnTestTelegram" type="button" class="px-4 py-2 rounded-lg text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white transition">
+              Enviar Mensaje de Prueba
+            </button>
+            <button id="btnSaveAlertConfig" type="button" class="px-4 py-2 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition">
+              Guardar Configuración
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: CLOUD GITHUB ACTIONS + REMOTE DISPATCH -->
+    <section id="tab-cloud" class="hidden space-y-5">
+      <!-- GitHub API Connection Card -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 class="text-sm font-bold text-white">Conexión con GitHub Actions (Envío de Nombres Dinámicos)</h2>
+            <p class="text-xs text-slate-400 mt-0.5">
+              Al pulsar <strong>Iniciar en GitHub</strong>, el panel envía los nombres actuales de tus tarjetas en orden (1, 2, 3...) y GitHub los empareja con tus enlaces privados guardados en el Secret <code>STREAMS_URLS</code>.
+            </p>
+          </div>
+          <button id="btnCheckGithubStatus" type="button" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition">
+            Comprobar Estado
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div>
+            <label for="ghOwner" class="block text-xs font-medium text-slate-300 mb-1">Usuario / Organización</label>
+            <input id="ghOwner" type="text" placeholder="tu-usuario" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-sky-500" />
+          </div>
+          <div>
+            <label for="ghRepo" class="block text-xs font-medium text-slate-300 mb-1">Repositorio</label>
+            <input id="ghRepo" type="text" placeholder="monitor-m3u8" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-sky-500" />
+          </div>
+          <div>
+            <label for="ghBranch" class="block text-xs font-medium text-slate-300 mb-1">Rama (Branch)</label>
+            <input id="ghBranch" type="text" value="main" placeholder="main" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-sky-500" />
+          </div>
+          <div>
+            <label for="ghWorkflow" class="block text-xs font-medium text-slate-300 mb-1">Archivo Workflow</label>
+            <input id="ghWorkflow" type="text" value="monitor_m3u8.yml" placeholder="monitor_m3u8.yml" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-sky-500" />
+          </div>
+        </div>
+
+        <div>
+          <label for="ghToken" class="block text-xs font-medium text-slate-300 mb-1">
+            Personal Access Token (Fine-grained · Solo permiso <code>Actions: Read and write</code>)
+          </label>
+          <input id="ghToken" type="password" placeholder="github_pat_..." class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-sky-500" />
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 pt-1">
+          <button id="btnSaveGithubConfig" type="button" class="px-4 py-2 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition">
+            Guardar Conexión
+          </button>
+          <button id="btnTriggerGithubTab" type="button" class="px-4 py-2 rounded-lg text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white transition">
+            Iniciar en GitHub Ahora
+          </button>
+          <button id="btnCancelGithubTab" type="button" class="px-4 py-2 rounded-lg text-xs font-semibold bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-700/60 transition">
+            Detener Ejecución Activa
+          </button>
+        </div>
+      </div>
+
+      <!-- Workflow YAML Generator (Links Private + Recovery Alert) -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div class="space-y-1 max-w-3xl">
+            <h2 class="text-sm font-bold text-white">Workflow con Enlaces Privados y Aviso de Recuperación (.github/workflows/monitor_m3u8.yml)</h2>
+            <p class="text-xs text-slate-300 leading-relaxed">
+              Guarda en <em>Settings → Secrets → Actions</em> los 3 secretos: <code>TG_BOT_TOKEN</code>, <code>TG_CHAT_ID</code> y <code>STREAMS_URLS</code> (un enlace <code>.m3u8</code> por línea). Avisa tanto al congelarse como al volver el movimiento.
+            </p>
+          </div>
+          <button id="btnCopyCloudCode" type="button" class="px-3.5 py-2 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition">
+            Copiar Workflow (.yml)
+          </button>
+        </div>
+
+        <textarea id="cloudWorkflowCode" readonly rows="22" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-xs font-mono text-emerald-300 focus:outline-none"></textarea>
+      </div>
+    </section>
+
+    <!-- TAB 4: LOGS -->
+    <section id="tab-logs" class="hidden space-y-4">
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-sm font-bold text-white">Historial de Eventos</h2>
+            <p class="text-xs text-slate-400">Registro de congelamientos, recuperaciones, envíos a Telegram y acciones en GitHub.</p>
+          </div>
+          <button id="btnClearLogs" type="button" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
+            Limpiar Historial
+          </button>
+        </div>
+        <div id="logsList" class="space-y-2 max-h-[420px] overflow-y-auto pr-1"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    const SAMPLE_W = 32;
+    const SAMPLE_H = 18;
+    const TOTAL_PIXELS = SAMPLE_W * SAMPLE_H;
+    const STORAGE_KEY = 'm3u8_freezeguard_tg_gh_v3';
+
+    const DEFAULT_CHANNELS = [
+      { id: 1, name: 'Canal 1 - Señal Principal', url: '' },
+      { id: 2, name: 'Canal 2 - Cámara Estudio', url: '' },
+      { id: 3, name: 'Canal 3 - Señal Reserva', url: '' },
+      { id: 4, name: 'Canal 4 - Feed Regional', url: '' },
+      { id: 5, name: 'Canal 5 - Enlace Exterior', url: '' },
+      { id: 6, name: 'Canal 6 - Transmisión Aux', url: '' },
+      { id: 7, name: 'Canal 7 - Señal Internacional', url: '' }
+    ];
+
+    const state = {
+      channels: [],
+      freezeThresholdSec: 10,
+      pixelDiffThresholdPct: 0.8,
+      autoStopHours: 13,
+      tgEnabled: true,
+      tgBotToken: '',
+      tgChatId: '',
+      alertCooldownSec: 120,
+      ghOwner: '',
+      ghRepo: '',
+      ghBranch: 'main',
+      ghWorkflow: 'monitor_m3u8.yml',
+      ghToken: '',
+      logs: [],
+      sessionStartMs: Date.now()
+    };
+
+    const runtime = {};
+    let wakeLockSentinel = null;
+
+    // --- Storage ---
+    function loadSavedState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY)
+          || localStorage.getItem('m3u8_freezeguard_tg_v2')
+          || localStorage.getItem('m3u8_freezeguard_v1');
+        if (raw) {
+          const p = JSON.parse(raw);
+          state.channels = Array.isArray(p.channels) && p.channels.length ? p.channels : structuredClone(DEFAULT_CHANNELS);
+          if (p.freezeThresholdSec) state.freezeThresholdSec = Number(p.freezeThresholdSec);
+          if (p.pixelDiffThresholdPct) state.pixelDiffThresholdPct = Number(p.pixelDiffThresholdPct);
+          if (p.autoStopHours) state.autoStopHours = Number(p.autoStopHours);
+          if (typeof p.tgEnabled === 'boolean') state.tgEnabled = p.tgEnabled;
+          if (p.tgBotToken) state.tgBotToken = p.tgBotToken;
+          if (p.tgChatId) state.tgChatId = p.tgChatId;
+          if (p.alertCooldownSec) state.alertCooldownSec = Number(p.alertCooldownSec);
+          if (p.ghOwner) state.ghOwner = p.ghOwner;
+          if (p.ghRepo) state.ghRepo = p.ghRepo;
+          if (p.ghBranch) state.ghBranch = p.ghBranch;
+          if (p.ghWorkflow) state.ghWorkflow = p.ghWorkflow;
+          if (p.ghToken) state.ghToken = p.ghToken;
+        } else {
+          state.channels = structuredClone(DEFAULT_CHANNELS);
+        }
+      } catch {
+        state.channels = structuredClone(DEFAULT_CHANNELS);
+      }
+    }
+
+    function saveState() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+          channels: state.channels,
+          freezeThresholdSec: state.freezeThresholdSec,
+          pixelDiffThresholdPct: state.pixelDiffThresholdPct,
+          autoStopHours: state.autoStopHours,
+          tgEnabled: state.tgEnabled,
+          tgBotToken: state.tgBotToken,
+          tgChatId: state.tgChatId,
+          alertCooldownSec: state.alertCooldownSec,
+          ghOwner: state.ghOwner,
+          ghRepo: state.ghRepo,
+          ghBranch: state.ghBranch,
+          ghWorkflow: state.ghWorkflow,
+          ghToken: state.ghToken
+        }));
+      } catch {}
+    }
+
+    function escapeHtml(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    // --- UI Helpers ---
+    function showToast(title, message, type) {
+      const container = document.getElementById('toastContainer');
+      const el = document.createElement('div');
+      const color = type === 'danger'
+        ? 'bg-rose-950/95 border-rose-500 text-rose-100'
+        : type === 'success'
+        ? 'bg-emerald-950/95 border-emerald-500 text-emerald-100'
+        : 'bg-slate-900/95 border-sky-500 text-slate-100';
+
+      el.className = 'pointer-events-auto border-l-4 rounded-lg p-3 shadow-xl backdrop-blur ' + color;
+      el.innerHTML = `<div class="text-xs font-bold">${escapeHtml(title)}</div><div class="text-[11px] opacity-90 mt-0.5">${escapeHtml(message)}</div>`;
+      container.appendChild(el);
+      setTimeout(() => el.remove(), 4500);
+    }
+
+    function switchTab(target) {
+      ['tab-monitor', 'tab-alerts', 'tab-cloud', 'tab-logs'].forEach(id => {
+        document.getElementById(id).classList.toggle('hidden', id !== target);
+      });
+      document.querySelectorAll('.nav-tab-btn').forEach(b => {
+        const active = b.dataset.tab === target;
+        b.className = active
+          ? 'nav-tab-btn px-4 py-2.5 text-xs sm:text-sm font-medium border-b-2 border-indigo-500 text-indigo-400 whitespace-nowrap transition flex items-center gap-1.5'
+          : 'nav-tab-btn px-4 py-2.5 text-xs sm:text-sm font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200 whitespace-nowrap transition flex items-center gap-1.5';
+      });
+      if (target === 'tab-cloud') updateCloudWorkflowGenerator();
+    }
+
+    async function requestWakeLock() {
+      if (wakeLockSentinel || !('wakeLock' in navigator)) return;
+      const badge = document.getElementById('wakeLockBadge');
+      try {
+        wakeLockSentinel = await navigator.wakeLock.request('screen');
+        wakeLockSentinel.addEventListener('release', () => { wakeLockSentinel = null; });
+        badge.textContent = 'Pantalla: Activa 12h+';
+        badge.className = 'text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700/60';
+      } catch {}
+    }
+
+    // --- Logs ---
+    function addLog(channelName, message, severity = 'info') {
+      const time = new Date().toLocaleTimeString('es-ES', { hour12: false });
+      state.logs.unshift({ time, channel: channelName, message, severity });
+      if (state.logs.length > 100) state.logs.pop();
+      renderLogs();
+    }
+
+    function renderLogs() {
+      document.getElementById('logCounterBadge').textContent = state.logs.length;
+      const list = document.getElementById('logsList');
+      if (!state.logs.length) {
+        list.innerHTML = '<div class="text-xs text-slate-500 py-8 text-center">Sin incidentes registrados en esta sesión.</div>';
+        return;
+      }
+      list.innerHTML = state.logs.map(item => {
+        const style = item.severity === 'danger'
+          ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+          : item.severity === 'success'
+          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+          : 'bg-slate-800 text-slate-300 border-slate-700';
+        return `<div class="flex items-center gap-2.5 bg-slate-950 border border-slate-800/90 px-3.5 py-2 rounded-lg text-xs">
+          <span class="font-mono text-slate-400">${escapeHtml(item.time)}</span>
+          <span class="px-2 py-0.5 rounded border text-[11px] font-semibold ${style}">${escapeHtml(item.channel)}</span>
+          <span class="text-slate-200">${escapeHtml(item.message)}</span>
+        </div>`;
+      }).join('');
+    }
+
+    // --- GitHub Actions API Controls ---
+    function isGithubConfigured() {
+      return Boolean(state.ghOwner && state.ghRepo && state.ghWorkflow && state.ghToken);
+    }
+
+    function setGhBadge(text, mode) {
+      const badge = document.getElementById('ghStatusBadge');
+      badge.textContent = text;
+      if (mode === 'running') {
+        badge.className = 'text-[11px] font-medium px-2 py-0.5 rounded-full bg-sky-950 text-sky-300 border border-sky-600/60';
+      } else if (mode === 'idle') {
+        badge.className = 'text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700';
+      } else if (mode === 'error') {
+        badge.className = 'text-[11px] font-medium px-2 py-0.5 rounded-full bg-rose-950 text-rose-300 border border-rose-700/60';
+      } else {
+        badge.className = 'text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700';
+      }
+    }
+
+    function ghHeaders() {
+      return {
+        'Authorization': `Bearer ${state.ghToken}`,
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/json'
+      };
+    }
+
+    async function checkGithubStatus(silent = false) {
+      if (!isGithubConfigured()) {
+        setGhBadge('Nube: Sin configurar', 'none');
+        return null;
+      }
+      const url = `https://api.github.com/repos/${encodeURIComponent(state.ghOwner)}/${encodeURIComponent(state.ghRepo)}/actions/workflows/${encodeURIComponent(state.ghWorkflow)}/runs?per_page=5`;
+      try {
+        const res = await fetch(url, { headers: ghHeaders() });
+        if (!res.ok) {
+          setGhBadge('Nube: Error acceso', 'error');
+          if (!silent) showToast('Error GitHub', `HTTP ${res.status}. Revisa repositorio, archivo .yml y token.`, 'danger');
+          return null;
+        }
+        const data = await res.json();
+        const activeRun = (data.workflow_runs || []).find(r => r.status === 'in_progress' || r.status === 'queued' || r.status === 'waiting');
+        if (activeRun) {
+          setGhBadge(`Nube: Activa (${activeRun.status === 'queued' ? 'En cola' : 'Vigilando'})`, 'running');
+          if (!silent) showToast('GitHub Actions Activo', `Ejecución #${activeRun.run_number} en curso.`, 'success');
+          return activeRun;
+        } else {
+          setGhBadge('Nube: Detenida', 'idle');
+          if (!silent) showToast('GitHub Actions Inactivo', 'No hay ejecuciones corriendo ahora.', 'info');
+          return null;
+        }
+      } catch (err) {
+        setGhBadge('Nube: Sin conexión', 'error');
+        if (!silent) showToast('Error de red', err.message, 'danger');
+        return null;
+      }
+    }
+
+    async function triggerGithubWorkflow() {
+      if (!isGithubConfigured()) {
+        switchTab('tab-cloud');
+        showToast('Falta configurar GitHub', 'Ingresa tu usuario, repositorio y token en la pestaña Modo Nube.', 'info');
+        return;
+      }
+
+      const namesList = state.channels
+        .map((c, idx) => (c.name || `Canal ${idx + 1}`).replace(/\|/g, '-').trim())
+        .join('|');
+
+      const btn = document.getElementById('btnTriggerGithub');
+      btn.disabled = true;
+      btn.classList.add('opacity-60');
+
+      const url = `https://api.github.com/repos/${encodeURIComponent(state.ghOwner)}/${encodeURIComponent(state.ghRepo)}/actions/workflows/${encodeURIComponent(state.ghWorkflow)}/dispatches`;
+
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: ghHeaders(),
+          body: JSON.stringify({
+            ref: state.ghBranch || 'main',
+            inputs: {
+              channel_names: namesList,
+              freeze_seconds: String(state.freezeThresholdSec),
+              cooldown_seconds: String(state.alertCooldownSec)
+            }
+          })
+        });
+
+        if (res.status === 204) {
+          setGhBadge('Nube: Iniciando...', 'running');
+          addLog('GitHub Actions', `Iniciado con ${state.channels.length} nombres editados (Umbral ${state.freezeThresholdSec}s)`, 'success');
+          showToast('GitHub Actions Iniciado', 'Se enviaron tus nombres editados. Tus links siguen privados en Secrets.', 'success');
+          setTimeout(() => checkGithubStatus(true), 3500);
+        } else {
+          const errBody = await res.json().catch(() => ({}));
+          const detail = errBody.message || `HTTP ${res.status}`;
+          addLog('GitHub Actions', `Error al iniciar: ${detail}`, 'danger');
+          showToast('No se pudo iniciar', `${detail}. Verifica el token y que el archivo .yml esté en la rama.`, 'danger');
+        }
+      } catch (err) {
+        showToast('Error de red', `No se pudo contactar con GitHub: ${err.message}`, 'danger');
+      } finally {
+        btn.disabled = false;
+        btn.classList.remove('opacity-60');
+      }
+    }
+
+    async function cancelGithubWorkflow() {
+      if (!isGithubConfigured()) {
+        switchTab('tab-cloud');
+        showToast('Falta configurar GitHub', 'Configura tu conexión en la pestaña Modo Nube.', 'info');
+        return;
+      }
+      const activeRun = await checkGithubStatus(true);
+      if (!activeRun) {
+        showToast('Nada que detener', 'No hay ninguna ejecución activa en GitHub Actions.', 'info');
+        return;
+      }
+
+      const cancelUrl = `https://api.github.com/repos/${encodeURIComponent(state.ghOwner)}/${encodeURIComponent(state.ghRepo)}/actions/runs/${activeRun.id}/cancel`;
+      try {
+        const res = await fetch(cancelUrl, { method: 'POST', headers: ghHeaders() });
+        if (res.status === 202) {
+          setGhBadge('Nube: Deteniendo...', 'idle');
+          addLog('GitHub Actions', `Cancelación enviada a ejecución #${activeRun.run_number}`, 'info');
+          showToast('Deteniendo Nube', 'Se solicitó detener el monitoreo en GitHub Actions.', 'success');
+          setTimeout(() => checkGithubStatus(true), 4000);
+        } else {
+          showToast('Error al detener', `GitHub respondió HTTP ${res.status}.`, 'danger');
+        }
+      } catch (err) {
+        showToast('Error de red', err.message, 'danger');
+      }
+    }
+
+    // --- Telegram Alerts (Freeze + Recovery) ---
+    async function sendTelegramMessage(text, channelName, logOkMsg) {
+      if (!state.tgEnabled || !state.tgBotToken || !state.tgChatId) return;
+      try {
+        const res = await fetch(`https://api.telegram.org/bot${encodeURIComponent(state.tgBotToken)}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: state.tgChatId, text })
+        });
+        if (res.ok) addLog(channelName, logOkMsg, 'info');
+        else addLog(channelName, `Error Telegram (HTTP ${res.status})`, 'danger');
+      } catch (err) {
+        addLog(channelName, `Error de red Telegram: ${err.message}`, 'danger');
+      }
+    }
+
+    async function sendTelegramAlert(ch, frozenSeconds) {
+      const rt = runtime[ch.id];
+      const now = Date.now();
+      if (rt && rt.lastAlertSentAt && (now - rt.lastAlertSentAt) < state.alertCooldownSec * 1000) return;
+      if (rt) rt.lastAlertSentAt = now;
+
+      addLog(ch.name, `IMAGEN PARALIZADA (${frozenSeconds}s sin movimiento)`, 'danger');
+      showToast(`🚨 Paralizado: ${ch.name}`, `${frozenSeconds}s sin movimiento.`, 'danger');
+
+      const text = `🚨 ALERTA IMAGEN PARALIZADA\nCanal: ${ch.name}\nTiempo congelado: ${frozenSeconds}s`;
+      await sendTelegramMessage(text, ch.name, 'Aviso de congelamiento enviado a Telegram');
+    }
+
+    async function sendTelegramRecovery(ch, frozenSeconds) {
+      addLog(ch.name, `Movimiento restablecido (estuvo ${frozenSeconds}s paralizado)`, 'success');
+      showToast(`✅ Restablecido: ${ch.name}`, `Movimiento normal tras ${frozenSeconds}s.`, 'success');
+
+      const text = `✅ MOVIMIENTO RESTABLECIDO\nCanal: ${ch.name}\nEstuvo paralizado: ${frozenSeconds}s`;
+      await sendTelegramMessage(text, ch.name, 'Aviso de recuperación enviado a Telegram');
+    }
+
+    // --- Channels Grid ---
+    function renderChannelsGrid() {
+      const grid = document.getElementById('channelsGrid');
+      grid.innerHTML = '';
+
+      state.channels.forEach((ch, idx) => {
+        if (!runtime[ch.id]) {
+          runtime[ch.id] = {
+            active: false, hls: null, ctx: null,
+            prevFrame: new Uint8ClampedArray(TOTAL_PIXELS * 4),
+            hasPrevFrame: false, frozenSec: 0, lastDiffPct: 0,
+            simulateFreeze: false, corsTainted: false,
+            lastDecodedFrames: 0, status: 'IDLE', lastAlertSentAt: 0,
+            dom: {}
+          };
+        }
+
+        const card = document.createElement('div');
+        card.id = `channel-card-${ch.id}`;
+        card.className = 'bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex flex-col justify-between transition-all';
+        card.innerHTML = `
+          <div class="p-3.5 space-y-2.5">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400" title="Posición correspondiente a la línea ${idx + 1} de STREAMS_URLS">#${idx + 1}</span>
+              <input type="text" data-action="edit-name" data-id="${ch.id}" value="${escapeHtml(ch.name)}"
+                class="bg-transparent text-xs font-bold text-white border-b border-transparent hover:border-slate-700 focus:border-indigo-500 focus:outline-none w-full truncate" />
+              <span id="status-badge-${ch.id}" class="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 whitespace-nowrap">DETENIDO</span>
+            </div>
+            <div class="relative rounded-lg overflow-hidden bg-slate-950 aspect-video border border-slate-800/90 flex items-center justify-center">
+              <video id="video-${ch.id}" class="w-full h-full object-cover" muted playsinline crossorigin="anonymous"></video>
+              <canvas id="canvas-${ch.id}" width="${SAMPLE_W}" height="${SAMPLE_H}" class="hidden"></canvas>
+              <div id="overlay-${ch.id}" class="absolute inset-0 flex items-center justify-center bg-slate-950/80 text-center p-2 pointer-events-none">
+                <span class="text-xs text-slate-400 font-medium">Línea #${idx + 1} en STREAMS_URLS</span>
+              </div>
+              <div class="absolute bottom-1.5 left-1.5 right-1.5 flex items-center justify-between px-2 py-1 rounded bg-slate-950/85 text-[11px] font-mono">
+                <span>Mov: <strong id="diff-val-${ch.id}" class="text-emerald-400">0.0%</strong></span>
+                <span>Fijo: <strong id="freeze-sec-${ch.id}" class="text-slate-200">0s</strong> / <span class="threshold-label">${state.freezeThresholdSec}</span>s</span>
+              </div>
+            </div>
+            <input type="url" data-action="edit-url" data-id="${ch.id}" value="${escapeHtml(ch.url)}"
+              placeholder="Opcional (solo para vista local .m3u8)"
+              class="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500" />
+          </div>
+          <div class="px-3.5 py-2.5 bg-slate-950/70 border-t border-slate-800/80 flex items-center justify-between gap-1.5">
+            <button type="button" data-action="toggle-stream" data-id="${ch.id}" id="btn-toggle-${ch.id}"
+              class="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition flex-1">Iniciar</button>
+            <button type="button" data-action="simulate-freeze" data-id="${ch.id}" id="btn-sim-${ch.id}"
+              class="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 transition">Simular Freeze</button>
+            <button type="button" data-action="remove-channel" data-id="${ch.id}"
+              class="px-2 py-1.5 rounded-lg text-xs text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition">✕</button>
+          </div>`;
+
+        grid.appendChild(card);
+
+        const canvas = card.querySelector(`#canvas-${ch.id}`);
+        runtime[ch.id].ctx = canvas.getContext('2d', { willReadFrequently: true });
+        runtime[ch.id].dom = {
+          card,
+          video: card.querySelector(`#video-${ch.id}`),
+          badge: card.querySelector(`#status-badge-${ch.id}`),
+          overlay: card.querySelector(`#overlay-${ch.id}`),
+          diffEl: card.querySelector(`#diff-val-${ch.id}`),
+          freezeEl: card.querySelector(`#freeze-sec-${ch.id}`),
+          toggleBtn: card.querySelector(`#btn-toggle-${ch.id}`),
+          simBtn: card.querySelector(`#btn-sim-${ch.id}`)
+        };
+      });
+
+      updateCountersUI();
+    }
+
+    function startChannel(channelId) {
+      const ch = state.channels.find(c => c.id === channelId);
+      if (!ch || !ch.url.trim()) {
+        showToast('Falta URL local', `Para monitoreo local ingresa una URL en ${ch ? ch.name : 'el canal'}.`, 'info');
+        return;
+      }
+
+      stopChannel(channelId);
+      requestWakeLock();
+
+      const rt = runtime[channelId];
+      const { video, overlay, toggleBtn } = rt.dom;
+
+      rt.active = true;
+      rt.frozenSec = 0;
+      rt.lastAlertSentAt = 0;
+      rt.hasPrevFrame = false;
+      rt.simulateFreeze = false;
+      rt.corsTainted = false;
+      rt.status = 'RUNNING';
+
+      overlay.classList.remove('hidden');
+      overlay.innerHTML = '<span class="text-xs text-indigo-300 font-medium animate-pulse">Conectando...</span>';
+      toggleBtn.textContent = 'Detener';
+      toggleBtn.className = 'px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-rose-600/80 hover:bg-rose-600 text-white transition flex-1';
+
+      const url = ch.url.trim();
+      if (window.Hls && Hls.isSupported()) {
+        const hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true,
+          capLevelToPlayerSize: true,
+          maxBufferLength: 10,
+          maxMaxBufferLength: 15,
+          backBufferLength: 5
+        });
+        rt.hls = hls;
+        hls.loadSource(url);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          video.play().catch(() => {});
+          overlay.classList.add('hidden');
+        });
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          if (data.fatal) {
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
+            else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
+          }
+        });
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = url;
+        video.addEventListener('loadedmetadata', () => {
+          video.play().catch(() => {});
+          overlay.classList.add('hidden');
+        }, { once: true });
+      }
+
+      updateChannelCardUI(channelId);
+      updateCountersUI();
+    }
+
+    function stopChannel(channelId) {
+      const rt = runtime[channelId];
+      if (!rt) return;
+      if (rt.hls) { rt.hls.destroy(); rt.hls = null; }
+      const { video, overlay, toggleBtn, simBtn } = rt.dom;
+      if (video) { video.pause(); video.removeAttribute('src'); video.load(); }
+
+      rt.active = false;
+      rt.frozenSec = 0;
+      rt.lastAlertSentAt = 0;
+      rt.lastDiffPct = 0;
+      rt.hasPrevFrame = false;
+      rt.simulateFreeze = false;
+      rt.status = 'IDLE';
+
+      if (overlay) {
+        overlay.classList.remove('hidden');
+        overlay.innerHTML = '<span class="text-xs text-slate-400 font-medium">Monitoreo local detenido</span>';
+      }
+      if (toggleBtn) {
+        toggleBtn.textContent = 'Iniciar';
+        toggleBtn.className = 'px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition flex-1';
+      }
+      if (simBtn) simBtn.textContent = 'Simular Freeze';
+
+      updateChannelCardUI(channelId);
+      updateCountersUI();
+    }
+
+    function inspectChannelFrame(ch) {
+      const rt = runtime[ch.id];
+      if (!rt || !rt.active) return;
+
+      const video = rt.dom.video;
+      let diffPct = 0;
+
+      if (rt.simulateFreeze) {
+        diffPct = 0.0;
+      } else if (video.readyState >= 2 && !video.paused) {
+        if (!rt.corsTainted) {
+          try {
+            rt.ctx.drawImage(video, 0, 0, SAMPLE_W, SAMPLE_H);
+            const data = rt.ctx.getImageData(0, 0, SAMPLE_W, SAMPLE_H).data;
+
+            if (rt.hasPrevFrame) {
+              let changed = 0;
+              const prev = rt.prevFrame;
+              for (let i = 0; i < data.length; i += 4) {
+                if (Math.abs(data[i] - prev[i]) + Math.abs(data[i + 1] - prev[i + 1]) + Math.abs(data[i + 2] - prev[i + 2]) > 36) {
+                  changed++;
+                }
+              }
+              diffPct = (changed / TOTAL_PIXELS) * 100;
+            } else {
+              diffPct = 100;
+              rt.hasPrevFrame = true;
+            }
+            rt.prevFrame.set(data);
+          } catch {
+            rt.corsTainted = true;
+          }
+        }
+
+        if (rt.corsTainted) {
+          const decoded = video.getVideoPlaybackQuality
+            ? (video.getVideoPlaybackQuality().totalVideoFrames || 0)
+            : (video.webkitDecodedFrameCount || 0);
+          diffPct = (decoded - rt.lastDecodedFrames) > 0 ? 2.5 : 0.0;
+          rt.lastDecodedFrames = decoded;
+        }
+      }
+
+      rt.lastDiffPct = diffPct;
+
+      if (diffPct < state.pixelDiffThresholdPct) {
+        rt.frozenSec += 1;
+      } else {
+        if (rt.status === 'FROZEN') {
+          const prevFrozen = rt.frozenSec;
+          rt.lastAlertSentAt = 0;
+          sendTelegramRecovery(ch, prevFrozen);
+        }
+        rt.frozenSec = 0;
+        rt.status = 'RUNNING';
+      }
+
+      if (rt.frozenSec >= state.freezeThresholdSec) {
+        rt.status = 'FROZEN';
+        sendTelegramAlert(ch, rt.frozenSec);
+      }
+
+      updateChannelCardUI(ch.id);
+    }
+
+    function updateChannelCardUI(channelId) {
+      const rt = runtime[channelId];
+      if (!rt || !rt.dom.card) return;
+      const { card, badge, diffEl, freezeEl, overlay } = rt.dom;
+
+      diffEl.textContent = rt.lastDiffPct.toFixed(1) + '%';
+      diffEl.className = rt.lastDiffPct < state.pixelDiffThresholdPct ? 'text-rose-400' : 'text-emerald-400';
+
+      freezeEl.textContent = rt.frozenSec + 's';
+      freezeEl.className = rt.frozenSec >= state.freezeThresholdSec
+        ? 'text-rose-400 font-bold'
+        : rt.frozenSec >= Math.ceil(state.freezeThresholdSec / 2)
+        ? 'text-amber-300'
+        : 'text-slate-200';
+
+      if (!rt.active) {
+        card.className = 'bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex flex-col justify-between transition-all';
+        badge.textContent = 'DETENIDO';
+        badge.className = 'text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 whitespace-nowrap';
+        return;
+      }
+
+      if (rt.status === 'FROZEN') {
+        card.className = 'bg-rose-950/30 border-2 border-rose-500 rounded-xl overflow-hidden flex flex-col justify-between transition-all freeze-alert-card';
+        badge.textContent = `🚨 PARALIZADO (${rt.frozenSec}s)`;
+        badge.className = 'text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-rose-600 text-white whitespace-nowrap';
+        overlay.classList.remove('hidden');
+        overlay.innerHTML = `<div class="bg-rose-600/90 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-lg">⚠️ PARALIZADO (${rt.frozenSec}s)</div>`;
+      } else {
+        card.className = 'bg-slate-900 border border-emerald-500/40 rounded-xl overflow-hidden flex flex-col justify-between transition-all';
+        badge.textContent = rt.simulateFreeze ? 'SIMULANDO...' : 'EN VIVO · OK';
+        badge.className = rt.simulateFreeze
+          ? 'text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 whitespace-nowrap'
+          : 'text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 whitespace-nowrap';
+        if (!rt.simulateFreeze) overlay.classList.add('hidden');
+      }
+    }
+
+    function updateCountersUI() {
+      let ok = 0, frozen = 0;
+      for (const ch of state.channels) {
+        const rt = runtime[ch.id];
+        if (rt && rt.active) {
+          if (rt.status === 'FROZEN') frozen++;
+          else ok++;
+        }
+      }
+      document.getElementById('countOk').textContent = ok;
+      document.getElementById('countFrozen').textContent = frozen;
+    }
+
+    // --- Private-Links GitHub Actions YAML Generator (Freeze + Recovery) ---
+    function updateCloudWorkflowGenerator() {
+      document.getElementById('cloudWorkflowCode').value = `name: Monitor M3U8 Anti-Freeze (Links Privados)
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel_names:
+        description: 'Nombres separados por | (enviados desde el panel)'
+        required: false
+        default: ''
+      freeze_seconds:
+        description: 'Segundos congelados para alertar'
+        required: false
+        default: '${state.freezeThresholdSec}'
+      cooldown_seconds:
+        description: 'Espera entre alertas repetidas (seg)'
+        required: false
+        default: '${state.alertCooldownSec}'
+
+jobs:
+  vigilar_streams:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Instalar FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg curl
+
+      - name: Vigilar enlaces privados (Congelamiento y Recuperación)
+        env:
+          TG_BOT_TOKEN: \${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: \${{ secrets.TG_CHAT_ID }}
+          STREAMS_URLS: \${{ secrets.STREAMS_URLS }}
+          CHANNEL_NAMES: \${{ inputs.channel_names }}
+          FREEZE_SEC: \${{ inputs.freeze_seconds }}
+          COOLDOWN_SEC: \${{ inputs.cooldown_seconds }}
+        run: |
+          FREEZE_SEC="\${FREEZE_SEC:-10}"
+          COOLDOWN_SEC="\${COOLDOWN_SEC:-120}"
+          SAMPLE_DUR=\$((FREEZE_SEC + 4))
+
+          IFS='|' read -ra NAMES <<< "\$CHANNEL_NAMES"
+          mapfile -t URLS <<< "\$STREAMS_URLS"
+
+          END_TIME=\$((SECONDS + 21400))
+          while [ \$SECONDS -lt \$END_TIME ]; do
+            for i in "\${!URLS[@]}"; do
+              URL="\${URLS[\$i]//\$'\\r'/}"
+              URL="\${URL#"\${URL%%[![:space:]]*}"}"
+              URL="\${URL%"\${URL##*[![:space:]]}"}"
+              [ -z "\$URL" ] && continue
+              NAME="\${NAMES[\$i]:-Canal \$((i + 1))}"
+              (
+                FROZEN_FLAG="/tmp/tg_frozen_\${i}"
+                CD_FILE="/tmp/tg_cd_\${i}"
+                OUT=\$(ffmpeg -hide_banner -loglevel info -rw_timeout 10000000 -i "\$URL" -t "\$SAMPLE_DUR" -vf "freezedetect=n=-55dB:d=\${FREEZE_SEC}" -an -f null - 2>&1 || true)
+
+                if echo "\$OUT" | grep -q "lavfi.freezedetect.freeze_start"; then
+                  touch "\$FROZEN_FLAG"
+                  NOW=\$(date +%s)
+                  LAST=0
+                  [ -f "\$CD_FILE" ] && LAST=\$(cat "\$CD_FILE" 2>/dev/null || echo 0)
+                  if [ \$((NOW - LAST)) -ge "\$COOLDOWN_SEC" ]; then
+                    echo "\$NOW" > "\$CD_FILE"
+                    MSG="🚨 IMAGEN PARALIZADA: \${NAME} lleva al menos \${FREEZE_SEC}s sin movimiento."
+                    if [ -n "\$TG_BOT_TOKEN" ] && [ -n "\$TG_CHAT_ID" ]; then
+                      curl -s -X POST "https://api.telegram.org/bot\${TG_BOT_TOKEN}/sendMessage" \\
+                        --data-urlencode "chat_id=\${TG_CHAT_ID}" \\
+                        --data-urlencode "text=\${MSG}" > /dev/null
+                    fi
+                  fi
+                elif [ -f "\$FROZEN_FLAG" ] && echo "\$OUT" | grep -qE "frame=[[:space:]]*[1-9]"; then
+                  rm -f "\$FROZEN_FLAG" "\$CD_FILE"
+                  MSG="✅ MOVIMIENTO RESTABLECIDO: \${NAME} volvió a transmitir con normalidad."
+                  if [ -n "\$TG_BOT_TOKEN" ] && [ -n "\$TG_CHAT_ID" ]; then
+                    curl -s -X POST "https://api.telegram.org/bot\${TG_BOT_TOKEN}/sendMessage" \\
+                      --data-urlencode "chat_id=\${TG_CHAT_ID}" \\
+                      --data-urlencode "text=\${MSG}" > /dev/null
+                  fi
+                fi
+              ) &
+            done
+            wait
+            sleep 5
+          done`;
+    }
+
+    // --- Init ---
+    function initApp() {
+      loadSavedState();
+
+      document.getElementById('freezeSecondsInput').value = state.freezeThresholdSec;
+      document.getElementById('sensitivityInput').value = state.pixelDiffThresholdPct;
+      document.getElementById('autoStopHoursInput').value = state.autoStopHours;
+      document.getElementById('tgEnabled').checked = state.tgEnabled;
+      document.getElementById('tgBotToken').value = state.tgBotToken;
+      document.getElementById('tgChatId').value = state.tgChatId;
+      document.getElementById('alertCooldownSec').value = state.alertCooldownSec;
+
+      document.getElementById('ghOwner').value = state.ghOwner;
+      document.getElementById('ghRepo').value = state.ghRepo;
+      document.getElementById('ghBranch').value = state.ghBranch;
+      document.getElementById('ghWorkflow').value = state.ghWorkflow;
+      document.getElementById('ghToken').value = state.ghToken;
+
+      renderChannelsGrid();
+      renderLogs();
+      updateCloudWorkflowGenerator();
+      checkGithubStatus(true);
+
+      // Tabs
+      document.querySelectorAll('.nav-tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+      });
+
+      // Local Controls
+      document.getElementById('btnStartAll').addEventListener('click', () => {
+        let started = 0;
+        state.channels.forEach(ch => { if (ch.url.trim()) { startChannel(ch.id); started++; } });
+        if (!started) showToast('Sin enlaces locales', 'Pega al menos una URL .m3u8 o usa "Iniciar en GitHub".', 'info');
+        else showToast('Monitoreo Local Iniciado', `Vigilando ${started} canal(es).`, 'success');
+      });
+
+      document.getElementById('btnStopAll').addEventListener('click', () => {
+        state.channels.forEach(ch => stopChannel(ch.id));
+        showToast('Detenido', 'Monitoreo local detenido.', 'info');
+      });
+
+      // GitHub Dispatch & Cancel Buttons
+      document.getElementById('btnTriggerGithub').addEventListener('click', triggerGithubWorkflow);
+      document.getElementById('btnTriggerGithubTab').addEventListener('click', triggerGithubWorkflow);
+      document.getElementById('btnCancelGithub').addEventListener('click', cancelGithubWorkflow);
+      document.getElementById('btnCancelGithubTab').addEventListener('click', cancelGithubWorkflow);
+      document.getElementById('btnCheckGithubStatus').addEventListener('click', () => checkGithubStatus(false));
+
+      document.getElementById('btnSaveGithubConfig').addEventListener('click', () => {
+        state.ghOwner = document.getElementById('ghOwner').value.trim();
+        state.ghRepo = document.getElementById('ghRepo').value.trim();
+        state.ghBranch = document.getElementById('ghBranch').value.trim() || 'main';
+        state.ghWorkflow = document.getElementById('ghWorkflow').value.trim() || 'monitor_m3u8.yml';
+        state.ghToken = document.getElementById('ghToken').value.trim();
+        saveState();
+        showToast('Conexión Guardada', 'Credenciales de GitHub guardadas localmente en este navegador.', 'success');
+        checkGithubStatus(false);
+      });
+
+      // Params
+      document.getElementById('freezeSecondsInput').addEventListener('change', e => {
+        state.freezeThresholdSec = Math.max(3, Number(e.target.value) || 10);
+        saveState();
+        document.querySelectorAll('.threshold-label').forEach(el => el.textContent = state.freezeThresholdSec);
+        updateCloudWorkflowGenerator();
+      });
+
+      document.getElementById('sensitivityInput').addEventListener('change', e => {
+        state.pixelDiffThresholdPct = Math.max(0.1, Number(e.target.value) || 0.8);
+        saveState();
+      });
+
+      document.getElementById('autoStopHoursInput').addEventListener('change', e => {
+        state.autoStopHours = Math.max(1, Number(e.target.value) || 13);
+        saveState();
+      });
+
+      document.getElementById('btnLoadDemoStreams').addEventListener('click', () => {
+        const demos = [
+          'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
+          'https://commondatastorage.googleapis.com/gtv-videos-bucket/CastVideos/hls/BigBuckBunny.m3u8',
+          'https://commondatastorage.googleapis.com/gtv-videos-bucket/CastVideos/hls/ElephantsDream.m3u8'
+        ];
+        state.channels.forEach((ch, idx) => ch.url = demos[idx % demos.length]);
+        saveState();
+        renderChannelsGrid();
+        showToast('Demos Cargados', 'Pulsa Iniciar Local para probar.', 'success');
+      });
+
+      document.getElementById('btnAddChannel').addEventListener('click', () => {
+        const nextId = state.channels.reduce((max, c) => Math.max(max, c.id), 0) + 1;
+        state.channels.push({ id: nextId, name: `Canal ${nextId}`, url: '' });
+        saveState();
+        renderChannelsGrid();
+      });
+
+      // Grid Delegation
+      const grid = document.getElementById('channelsGrid');
+      grid.addEventListener('input', e => {
+        const id = Number(e.target.dataset.id);
+        const ch = state.channels.find(c => c.id === id);
+        if (!ch) return;
+        if (e.target.dataset.action === 'edit-name') ch.name = e.target.value;
+        if (e.target.dataset.action === 'edit-url') ch.url = e.target.value;
+        saveState();
+      });
+
+      grid.addEventListener('click', e => {
+        const btn = e.target.closest('button[data-action]');
+        if (!btn) return;
+        const id = Number(btn.dataset.id);
+        const rt = runtime[id];
+
+        if (btn.dataset.action === 'toggle-stream') {
+          if (rt && rt.active) stopChannel(id);
+          else startChannel(id);
+        } else if (btn.dataset.action === 'simulate-freeze') {
+          if (!rt || !rt.active) startChannel(id);
+          if (runtime[id]) {
+            runtime[id].simulateFreeze = !runtime[id].simulateFreeze;
+            btn.textContent = runtime[id].simulateFreeze ? 'Quitar Freeze' : 'Simular Freeze';
+            updateChannelCardUI(id);
+          }
+        } else if (btn.dataset.action === 'remove-channel') {
+          stopChannel(id);
+          delete runtime[id];
+          state.channels = state.channels.filter(c => c.id !== id);
+          saveState();
+          renderChannelsGrid();
+        }
+      });
+
+      // Telegram Config
+      document.getElementById('btnSaveAlertConfig').addEventListener('click', () => {
+        state.tgEnabled = document.getElementById('tgEnabled').checked;
+        state.tgBotToken = document.getElementById('tgBotToken').value.trim();
+        state.tgChatId = document.getElementById('tgChatId').value.trim();
+        state.alertCooldownSec = Math.max(15, Number(document.getElementById('alertCooldownSec').value) || 120);
+        saveState();
+        updateCloudWorkflowGenerator();
+        showToast('Guardado', 'Configuración de Telegram guardada.', 'success');
+      });
+
+      document.getElementById('btnTestTelegram').addEventListener('click', async () => {
+        const token = document.getElementById('tgBotToken').value.trim();
+        const chatId = document.getElementById('tgChatId').value.trim();
+        if (!token || !chatId) {
+          showToast('Faltan datos', 'Ingresa Bot Token y Chat ID.', 'danger');
+          return;
+        }
+        try {
+          const res = await fetch(`https://api.telegram.org/bot${encodeURIComponent(token)}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: chatId,
+              text: `✅ Prueba M3U8 FreezeGuard: Alertas de congelamiento y recuperación activas (Umbral ${state.freezeThresholdSec}s).`
+            })
+          });
+          if (res.ok) showToast('Telegram Conectado', 'Mensaje de prueba enviado.', 'success');
+          else showToast('Error Telegram', 'Verifica Token y Chat ID.', 'danger');
+        } catch {
+          showToast('Error de red', 'No se pudo conectar a Telegram.', 'danger');
+        }
+      });
+
+      document.getElementById('btnCopyCloudCode').addEventListener('click', () => {
+        const ta = document.getElementById('cloudWorkflowCode');
+        navigator.clipboard?.writeText(ta.value).catch(() => { ta.select(); document.execCommand('copy'); });
+        showToast('Copiado', 'Workflow copiado al portapapeles.', 'success');
+      });
+
+      document.getElementById('btnClearLogs').addEventListener('click', () => {
+        state.logs = [];
+        renderLogs();
+      });
+
+      // Global 1-second Loop
+      setInterval(() => {
+        for (const ch of state.channels) {
+          if (runtime[ch.id]?.active) inspectChannelFrame(ch);
+        }
+        updateCountersUI();
+
+        const elapsed = Math.floor((Date.now() - state.sessionStartMs) / 1000);
+        const h = String(Math.floor(elapsed / 3600)).padStart(2, '0');
+        const m = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0');
+        const s = String(elapsed % 60).padStart(2, '0');
+        document.getElementById('sessionUptime').textContent = `${h}:${m}:${s}`;
+
+        if (elapsed >= state.autoStopHours * 3600) {
+          state.channels.forEach(ch => { if (runtime[ch.id]?.active) stopChannel(ch.id); });
+        }
+      }, 1000);
+    }
+
+    window.addEventListener('DOMContentLoaded', initApp);
+  </script>
+</body>
+</html>
